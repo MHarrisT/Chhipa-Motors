@@ -85,11 +85,23 @@ namespace Chhipa_Motors
         PlayingState playingState = null!;
         GameOverState gameOverState = null!;
 
+        // New fields for smooth continuous player movement
+        bool holdLeft = false;
+        bool holdRight = false;
+        bool holdUp = false;
+        bool holdDown = false;
+        int playerSpeed = 8; // pixels per tick, adjust for smoothness
+
         public Game()
         {
             InitializeComponent();
             this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
             this.UpdateStyles();
+
+            // ensure form receives key events before controls
+            this.KeyPreview = true;
+            // wire key events explicitly (designer may already wire KeyDown - this ensures KeyUp works)
+            this.KeyUp += Game_KeyUp;
 
             rand = new Random();
             int carW = trafficVehicle1.Width;
@@ -253,14 +265,19 @@ namespace Chhipa_Motors
 
             player.Rect = new Rectangle(PlayerCar.Location, PlayerCar.Size);
             road1Rect = new Rectangle(Road1.Left, Road1.Top, Road1.Width, Road1.Height);
-            road2Rect = new Rectangle(Road1.Left, Road1.Top - road1Rect.Height, Road1.Width, Road1.Height);
+            road2Rect = new Rectangle(Road1.Left, Road1.Top - road1Rect.Height, Road1.Width, road1Rect.Height);
 
             // Respawn traffic through manager and sync local refs
             foreach (var v in TrafficManager.Traffic) TrafficManager.Respawn(v);
             SyncLocalTrafficRefs();
 
+            // reset input flags
+            ClearMovementFlags();
+
             // NEW state transition to playing
             SwitchToPlaying();
+            // ensure form has focus to receive keyboard input
+            this.Focus();
         }
 
         private Image? FitImageToBox(Image original, int width, int height)
@@ -400,6 +417,12 @@ namespace Chhipa_Motors
             if (road1Rect.Y >= this.Height) road1Rect.Y = road2Rect.Y - road1Rect.Height;
             if (road2Rect.Y >= this.Height) road2Rect.Y = road1Rect.Y - road2Rect.Height;
 
+            // Move player smoothly based on held keys (only while playing)
+            if (CurrentState == playingState)
+            {
+                UpdatePlayerMovement();
+            }
+
             // Use TrafficManager to move traffic
             var passedIndices = TrafficManager.UpdateAll(moveSpeed, this.ClientSize.Height);
 
@@ -424,11 +447,11 @@ namespace Chhipa_Motors
                 player.Rect.IntersectsWith(traffic2.Rect) ||
                 player.Rect.IntersectsWith(traffic3.Rect))
             {
-                this.Invalidate();
-                this.Update();
+                // stop and show game over
                 gameTimer.Stop();
                 UpdateTopScoreIfNeeded();
                 lblFinalScore.Text = $"Score: {score}\nBest: {topScore}";
+
                 // switch to GameOver state
                 CurrentState.Exit();
                 CurrentState = gameOverState;
@@ -451,26 +474,96 @@ namespace Chhipa_Motors
             if (list.Length >= 3) { traffic3.Rect = list[2].Rect; traffic3.Img = list[2].Img; }
         }
 
-        // Called by PlayingState to handle movement input
+        // New: update player every tick based on hold flags for smooth movement
+        private void UpdatePlayerMovement()
+        {
+            if (holdLeft && !holdRight)
+            {
+                int newX = player.Rect.X - playerSpeed;
+                if (newX > road1Rect.X) player.Rect.X = newX;
+            }
+            if (holdRight && !holdLeft)
+            {
+                int newX = player.Rect.X + playerSpeed;
+                if (newX + player.Rect.Width < road1Rect.X + road1Rect.Width) player.Rect.X = newX;
+            }
+            if (holdUp && !holdDown)
+            {
+                int newY = player.Rect.Y - playerSpeed;
+                if (newY > 0) player.Rect.Y = newY;
+            }
+            if (holdDown && !holdUp)
+            {
+                int newY = player.Rect.Y + playerSpeed;
+                if (newY + player.Rect.Height < this.ClientSize.Height) player.Rect.Y = newY;
+            }
+        }
+
+        // Called by PlayingState to handle immediate key-based movement (deprecated - we use hold flags now)
         public void HandlePlayerInput(KeyEventArgs e)
         {
-            if (gameTimer.Enabled == false) return;
-            int speed = 25;
-            if (e.KeyCode == Keys.Left || e.KeyCode == Keys.A)
+            // kept for compatibility but no longer performs movement; we prefer key hold approach
+        }
+
+        // KeyDown: set hold flags only when in playing state; otherwise forward to state
+        private void Game_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (CurrentState == playingState)
             {
-                if (player.Rect.X - speed > road1Rect.X) player.Rect.X -= speed;
+                switch (e.KeyCode)
+                {
+                    case Keys.Left:
+                    case Keys.A:
+                        holdLeft = true;
+                        break;
+                    case Keys.Right:
+                    case Keys.D:
+                        holdRight = true;
+                        break;
+                    case Keys.Up:
+                    case Keys.W:
+                        holdUp = true;
+                        break;
+                    case Keys.Down:
+                    case Keys.S:
+                        holdDown = true;
+                        break;
+                }
+                // don't forward to state; handled locally
+                e.Handled = true;
+                return;
             }
-            if (e.KeyCode == Keys.Right || e.KeyCode == Keys.D)
+
+            // default behavior - forward to current state (menu etc.)
+            CurrentState?.OnKeyDown(e);
+        }
+
+        // KeyUp: clear hold flags
+        private void Game_KeyUp(object? sender, KeyEventArgs e)
+        {
+            if (CurrentState == playingState)
             {
-                if (player.Rect.X + speed < road1Rect.X + road1Rect.Width - player.Rect.Width) player.Rect.X += speed;
-            }
-            if (e.KeyCode == Keys.Up || e.KeyCode == Keys.W)
-            {
-                if (player.Rect.Y > 0) player.Rect.Y -= speed;
-            }
-            if (e.KeyCode == Keys.Down || e.KeyCode == Keys.S)
-            {
-                if (player.Rect.Y + player.Rect.Height < this.ClientSize.Height) player.Rect.Y += speed;
+                switch (e.KeyCode)
+                {
+                    case Keys.Left:
+                    case Keys.A:
+                        holdLeft = false;
+                        break;
+                    case Keys.Right:
+                    case Keys.D:
+                        holdRight = false;
+                        break;
+                    case Keys.Up:
+                    case Keys.W:
+                        holdUp = false;
+                        break;
+                    case Keys.Down:
+                    case Keys.S:
+                        holdDown = false;
+                        break;
+                }
+                e.Handled = true;
+                return;
             }
         }
 
@@ -489,6 +582,9 @@ namespace Chhipa_Motors
             CurrentState.Exit();
             CurrentState = playingState;
             CurrentState.Enter();
+            // ensure input flags cleared and form has focus
+            ClearMovementFlags();
+            this.Focus();
         }
 
         public void SwitchToMenu()
@@ -561,6 +657,7 @@ namespace Chhipa_Motors
             btnPlayAgain.Click += (s, e) =>
             {
                 gameOverPanel.Visible = false;
+                // reset and switch to playing state so keyboard works again
                 ResetGame();
             };
             gameOverPanel.Controls.Add(btnPlayAgain);
@@ -871,15 +968,21 @@ namespace Chhipa_Motors
             if (creditsPanel != null) creditsPanel.Visible = false;
             if (howToPanel != null) howToPanel.Visible = false;
 
-            gameTimer.Start();
-            this.Invalidate();
+            // clear input flags before starting
+            ClearMovementFlags();
 
+            // use state transition so input starts working
+            SwitchToPlaying();
+
+            this.Invalidate();
             this.Focus();
         }
 
-        private void Game_KeyDown(object sender, KeyEventArgs e)
-        {            
-            CurrentState?.OnKeyDown(e);
+        private void ClearMovementFlags()
+        {
+            holdLeft = holdRight = holdUp = holdDown = false;
         }
+
+
     }
 }
