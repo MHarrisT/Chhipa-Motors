@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -26,8 +27,11 @@ namespace Chhipa_Motors
 
         int score = 0;
         const int pointsPerPass = 10;
-        Font scoreFont = new Font("Segoe UI", 24, FontStyle.Bold);
+        Font scoreFont = new Font("Segoe UI", 20, FontStyle.Bold);
         Brush scoreBrush = Brushes.White;
+
+        int topScore = 0;
+        Font topScoreFont = new Font("Segoe UI", 20, FontStyle.Bold);
 
         // Cached Images
         Image? carImage1, truckImage1, truckImage2, truckImage3, truckImage4, truckImage5;
@@ -54,6 +58,13 @@ namespace Chhipa_Motors
         PictureBox pbCredits = null!;
         PictureBox pbHowTo = null!;
         PictureBox pbQuit = null!;
+        Label lblMenuTopScore = null!;
+
+        // Car selection panel 
+        Panel carSelectPanel = null!;
+        Label lblSelectCar = null!;
+        PictureBox[] carChoices = Array.Empty<PictureBox>();
+        Button btnCarBack = null!;
 
         // Credits / HowTo panels
         Panel creditsPanel = null!;
@@ -62,6 +73,9 @@ namespace Chhipa_Motors
         Panel howToPanel = null!;
         Label howToLabel = null!;
         Button howToClose = null!;
+
+        string TopScoreFilePath =>
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ChhipaMotors", "topscore.txt");
 
         public Game()
         {
@@ -112,8 +126,12 @@ namespace Chhipa_Motors
             Road1.Visible = false;
             Road2.Visible = false;
 
+            // top score
+            LoadTopScore();
+
             CreateInFormGameOverUI();
             CreateMenuUI();
+            CreateCarSelectUI();
             CreateCreditsPanel();
             CreateHowToPanel();
 
@@ -124,6 +142,61 @@ namespace Chhipa_Motors
             PauseForMenu();
         }
 
+        private void LoadTopScore()
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(TopScoreFilePath) ?? "";
+                if (!Directory.Exists(dir) && dir.Length > 0)
+                    Directory.CreateDirectory(dir);
+
+                if (File.Exists(TopScoreFilePath))
+                {
+                    var txt = File.ReadAllText(TopScoreFilePath).Trim();
+                    if (int.TryParse(txt, out var val))
+                        topScore = val;
+                }
+            }
+            catch
+            {
+                topScore = 0;
+            }
+        }
+
+        private void SaveTopScore()
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(TopScoreFilePath) ?? "";
+                if (!Directory.Exists(dir) && dir.Length > 0)
+                    Directory.CreateDirectory(dir);
+
+                File.WriteAllText(TopScoreFilePath, topScore.ToString());
+            }
+            catch
+            {
+                // ignore write errors
+            }
+        }
+
+        private void UpdateTopScoreIfNeeded()
+        {
+            if (score > topScore)
+            {
+                topScore = score;
+                SaveTopScore();
+            }
+            UpdateMenuTopScoreLabel();
+        }
+
+        private void UpdateMenuTopScoreLabel()
+        {
+            if (lblMenuTopScore != null)
+            {
+                lblMenuTopScore.Text = $"Best: {topScore}";
+            }
+        }
+
         private void PauseForMenu()
         {
             if (gameTimer != null) gameTimer.Stop();
@@ -132,13 +205,30 @@ namespace Chhipa_Motors
             menuPanel.BringToFront();
 
             if (gameOverPanel != null) gameOverPanel.Visible = false;
+            carSelectPanel.Visible = false;
+
+            UpdateMenuTopScoreLabel();
         }
 
         private void StartGameFromMenu()
         {
+            // legacy start without explicit selection -> use current playerImage or default
+            StartGameWithSelectedCar(playerImage);
+        }
+
+        private void StartGameWithSelectedCar(Image? selectedCar)
+        {
             menuPanel.Visible = false;
-            
+            carSelectPanel.Visible = false;
+
             score = 0;
+
+            if (selectedCar != null)
+            {
+                playerImage = FitImageToBox(selectedCar, PlayerCar.Width, PlayerCar.Height);
+                player.Img = playerImage;
+            }
+
             player.Rect = new Rectangle(PlayerCar.Location, PlayerCar.Size);
             road1Rect = new Rectangle(Road1.Left, Road1.Top, Road1.Width, Road1.Height);
             road2Rect = new Rectangle(Road1.Left, Road1.Top - Road1.Height, Road1.Width, Road1.Height);
@@ -194,12 +284,18 @@ namespace Chhipa_Motors
             // 4. Draw Score (top-right)
             string scoreText = $"Score: {score}";
             SizeF textSize = g.MeasureString(scoreText, scoreFont);
-            float padding = 10f;
+            float padding = 20f;
             float x = this.ClientSize.Width - padding - textSize.Width;
             float y = padding;
             // Draw shadow
             g.DrawString(scoreText, scoreFont, Brushes.Black, x + 1, y + 1);
             g.DrawString(scoreText, scoreFont, scoreBrush, x, y);
+
+            // Draw top (best) score under current score
+            string bestText = $"Best: {topScore}";
+            SizeF bestSize = g.MeasureString(bestText, topScoreFont);
+            g.DrawString(bestText, topScoreFont, Brushes.Black, x + 1, y + textSize.Height + 4 + 1);
+            g.DrawString(bestText, topScoreFont, Brushes.White, x, y + textSize.Height + 4);
         }
 
         private void spawnTraffic(GameEntity car)
@@ -273,7 +369,6 @@ namespace Chhipa_Motors
 
         private void gameTimer_Tick(object sender, EventArgs e)
         {
-            // Move Roads
             road1Rect.Y += moveSpeed;
             road2Rect.Y += moveSpeed;
 
@@ -291,7 +386,6 @@ namespace Chhipa_Motors
             traffic2.Rect.Y += moveSpeed;
             traffic3.Rect.Y += moveSpeed;
 
-            // If a traffic car passes beyond the bottom, award points and respawn it
             if (traffic1.Rect.Y > this.Height)
             {
                 score += pointsPerPass;
@@ -315,7 +409,10 @@ namespace Chhipa_Motors
             {
                 gameTimer.Stop();
 
-                lblFinalScore.Text = $"Score: {score}";
+                // update best
+                UpdateTopScoreIfNeeded();
+
+                lblFinalScore.Text = $"Score: {score}\nBest: {topScore}";
                 gameOverPanel.Visible = true;
                 gameOverPanel.BringToFront();
                 this.Focus(); 
@@ -353,7 +450,7 @@ namespace Chhipa_Motors
             lblFinalScore = new Label
             {
                 Text = "Score: 0",
-                Font = new Font("Segoe UI", 14, FontStyle.Regular),
+                Font = new Font("Segoe UI", 12, FontStyle.Regular),
                 ForeColor = Color.White,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Dock = DockStyle.Top,
@@ -401,9 +498,6 @@ namespace Chhipa_Motors
                 Visible = false
             };
 
-            int gap = 16;
-
-            // Quick Play
             pbQuickPlay = new PictureBox
             {
                 Image = Properties.Resources.b_QuickPlay,
@@ -411,16 +505,19 @@ namespace Chhipa_Motors
                 Cursor = Cursors.Hand,
                 BackColor = Color.Transparent
             };
-            pbQuickPlay.Click += (s, e) => StartGameFromMenu();
+            pbQuickPlay.Click += (s, e) =>
+            {
+                // show car selection panel
+                menuPanel.Visible = false;
+                carSelectPanel.Visible = true;
+                carSelectPanel.BringToFront();
+            };
 
-            // Scale Credits button
             Image imgCredits = Properties.Resources.b_How2Play;
-
-            double? scaleFactor = 0.7;
+            double scaleFactor = 0.7;
             int credWidth = (int)(imgCredits.Width * scaleFactor);
             int credHeight = (int)(imgCredits.Height * scaleFactor + 4);
 
-            // Credits
             pbCredits = new PictureBox
             {
                 Image = Properties.Resources.b_Credits,
@@ -431,7 +528,6 @@ namespace Chhipa_Motors
             };
             pbCredits.Click += (s, e) => ShowCredits();
 
-            // How To Play
             pbHowTo = new PictureBox
             {
                 Image = Properties.Resources.b_How2Play,
@@ -441,7 +537,6 @@ namespace Chhipa_Motors
             };
             pbHowTo.Click += (s, e) => ShowHowTo();
 
-            // Quit
             pbQuit = new PictureBox
             {
                 Image = Properties.Resources.b_Quit,
@@ -451,25 +546,30 @@ namespace Chhipa_Motors
             };
             pbQuit.Click += (s, e) => Application.Exit();
 
+            int gap = 16;
             int totalHeight = pbQuickPlay.Height + pbCredits.Height + pbHowTo.Height + pbQuit.Height + (3 * gap);
             int currentY = (menuPanel.Height - totalHeight) / 2;
 
-            // Position Quick Play
             pbQuickPlay.Location = new Point((menuPanel.Width - pbQuickPlay.Width) / 2, currentY);
-
-            // Position Credits
             currentY = pbQuickPlay.Bottom + gap;
             pbCredits.Location = new Point((menuPanel.Width - pbCredits.Width) / 2, currentY);
-
-            // Position How To
             currentY = pbCredits.Bottom + gap;
             pbHowTo.Location = new Point((menuPanel.Width - pbHowTo.Width) / 2, currentY);
-
-            // Position Quit
             currentY = pbHowTo.Bottom + gap;
             pbQuit.Location = new Point((menuPanel.Width - pbQuit.Width) / 2, currentY);
 
-            // Assemble
+            // top score on menu
+            lblMenuTopScore = new Label
+            {
+                Text = $"Best: {topScore}",
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 12, FontStyle.Bold),
+                AutoSize = true,
+                Location = new Point(12, 12),
+                BackColor = Color.Transparent
+            };
+            menuPanel.Controls.Add(lblMenuTopScore);
+
             menuPanel.Controls.Add(pbQuickPlay);
             menuPanel.Controls.Add(pbCredits);
             menuPanel.Controls.Add(pbHowTo);
@@ -480,6 +580,91 @@ namespace Chhipa_Motors
             menuPanel.BringToFront();
 
             this.Resize += (s, e) => CenterOverlayPanel(menuPanel);
+        }
+
+        private void CreateCarSelectUI()
+        {
+            carSelectPanel = new Panel
+            {
+                Size = new Size(560, 300),
+                BackColor = Color.FromArgb(220, 15, 15, 15),
+                BorderStyle = BorderStyle.FixedSingle,
+                Visible = false
+            };
+
+            lblSelectCar = new Label
+            {
+                Text = "Select Your Car",
+                Font = new Font("Segoe UI", 18, FontStyle.Bold),
+                ForeColor = Color.White,
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Top,
+                Height = 60
+            };
+            carSelectPanel.Controls.Add(lblSelectCar);
+
+            // resources to show - using the names you specified
+            var resources = new Image?[]
+            {
+                Resources.chev,
+                Resources.f1car,
+                Resources.pointy,
+                Resources.sportscar1,
+                Resources.TopDownCar
+            };
+
+            carChoices = new PictureBox[resources.Length];
+            int spacing = 12;
+            int boxWidth = 96;
+            int boxHeight = 96;
+            int startX = (carSelectPanel.Width - (resources.Length * boxWidth + (resources.Length - 1) * spacing)) / 2;
+            int y = 80;
+
+            for (int i = 0; i < resources.Length; i++)
+            {
+                var pb = new PictureBox
+                {
+                    Size = new Size(boxWidth, boxHeight),
+                    Location = new Point(startX + i * (boxWidth + spacing), y),
+                    SizeMode = PictureBoxSizeMode.Zoom,
+                    Cursor = Cursors.Hand,
+                    BackColor = Color.Transparent,
+                    BorderStyle = BorderStyle.FixedSingle,
+                    Image = resources[i]
+                };
+
+                int idx = i; // capture
+                pb.Click += (s, e) =>
+                {
+                    // on selection, set as player image and start game
+                    Image? selected = resources[idx];
+                    StartGameWithSelectedCar(selected);
+                };
+
+                carChoices[i] = pb;
+                carSelectPanel.Controls.Add(pb);
+            }
+
+            btnCarBack = new Button
+            {
+                Text = "Back",
+                Size = new Size(100, 36),
+                Location = new Point((carSelectPanel.Width - 100) / 2, carSelectPanel.Height - 56)
+            };
+            btnCarBack.Click += (s, e) =>
+            {
+                carSelectPanel.Visible = false;
+                menuPanel.Visible = true;
+                menuPanel.BringToFront();
+            };
+            carSelectPanel.Controls.Add(btnCarBack);
+
+            CenterOverlayPanel(carSelectPanel);
+            this.Controls.Add(carSelectPanel);
+            carSelectPanel.BringToFront();
+
+            this.Resize += (s, e) => CenterOverlayPanel(carSelectPanel);
         }
 
         private void CreateCreditsPanel()
@@ -579,43 +764,34 @@ namespace Chhipa_Motors
 
         private void ResetGame()
         {
-            // Reset score
             score = 0;
 
-            // Reset player to original designer position
             player.Rect = new Rectangle(PlayerCar.Location, PlayerCar.Size);
 
-            // Reset roads
             road1Rect = new Rectangle(Road1.Left, Road1.Top, Road1.Width, Road1.Height);
             road2Rect = new Rectangle(Road1.Left, Road1.Top - Road1.Height, Road1.Width, Road1.Height);
 
-            // Respawn traffic
             spawnTraffic(traffic1);
             spawnTraffic(traffic2);
             spawnTraffic(traffic3);
 
-            // Hide overlays
             if (gameOverPanel != null) gameOverPanel.Visible = false;
             if (menuPanel != null) menuPanel.Visible = false;
             if (creditsPanel != null) creditsPanel.Visible = false;
             if (howToPanel != null) howToPanel.Visible = false;
 
-            // Restart timer and refresh
             gameTimer.Start();
             this.Invalidate();
 
-            // Ensure the form has focus to receive keyboard input
             this.Focus();
         }
 
         private void Game_KeyDown(object sender, KeyEventArgs e)
         {
-            // disabling all controls once game is over
             if (gameTimer.Enabled == false) return;
 
             int speed = 25;
 
-            // Handling movement of car
             if (e.KeyCode == Keys.Left || e.KeyCode == Keys.A)
             {
                 if (player.Rect.X - speed > road1Rect.X)

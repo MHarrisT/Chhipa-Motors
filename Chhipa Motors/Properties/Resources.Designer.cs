@@ -133,6 +133,16 @@ namespace Chhipa_Motors.Properties {
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
+        internal static System.Drawing.Bitmap pointy {
+            get {
+                object obj = ResourceManager.GetObject("pointy", resourceCulture);
+                return ((System.Drawing.Bitmap)(obj));
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized resource of type System.Drawing.Bitmap.
+        /// </summary>
         internal static System.Drawing.Bitmap RoadImg {
             get {
                 object obj = ResourceManager.GetObject("RoadImg", resourceCulture);
