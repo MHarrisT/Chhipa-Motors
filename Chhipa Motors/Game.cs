@@ -407,6 +407,8 @@ namespace Chhipa_Motors
                 player.Rect.IntersectsWith(traffic2.Rect) ||
                 player.Rect.IntersectsWith(traffic3.Rect))
             {
+                this.Invalidate();
+                this.Update();
                 gameTimer.Stop();
 
                 // update best
