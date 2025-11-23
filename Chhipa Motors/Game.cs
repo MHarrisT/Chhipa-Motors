@@ -1,13 +1,12 @@
 ﻿using Chhipa_Motors.Properties;
+using Chhipa_Motors.Entities;
+using Chhipa_Motors.Gameplay;
+using Chhipa_Motors.Managers;
+using Chhipa_Motors.States;
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Chhipa_Motors
@@ -19,6 +18,7 @@ namespace Chhipa_Motors
         {
             public Rectangle Rect;
             public Image? Img;
+            public IMoveBehavior? MoveBehavior; 
         }
 
         Random rand = new Random();
@@ -77,6 +77,14 @@ namespace Chhipa_Motors
         string TopScoreFilePath =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ChhipaMotors", "topscore.txt");
 
+        // NEW modular pieces
+        public TrafficManager TrafficManager { get; private set; } = null!;
+        public IGameState CurrentState { get; private set; } = null!;
+        MenuState menuState = null!;
+        CarSelectState carSelectState = null!;
+        PlayingState playingState = null!;
+        GameOverState gameOverState = null!;
+
         public Game()
         {
             InitializeComponent();
@@ -126,7 +134,6 @@ namespace Chhipa_Motors
             Road1.Visible = false;
             Road2.Visible = false;
 
-            // top score
             LoadTopScore();
 
             CreateInFormGameOverUI();
@@ -135,9 +142,26 @@ namespace Chhipa_Motors
             CreateCreditsPanel();
             CreateHowToPanel();
 
-            spawnTraffic(traffic1);
-            spawnTraffic(traffic2);
-            spawnTraffic(traffic3);
+            int[] lanes = new[] { 440, 560, 680 };
+            TrafficManager = new TrafficManager(rand, minSpacing, lanes);
+
+            // create traffic vehicles using designer positions but wrap as Vehicle objects
+            // we use existing trafficVehicle1/2/3 control sizes/locations as starting rect
+            var v1 = TrafficManager.CreateTraffic(new Rectangle(trafficVehicle1.Location, trafficVehicle1.Size), carImage1);
+            var v2 = TrafficManager.CreateTraffic(new Rectangle(trafficVehicle2.Location, trafficVehicle2.Size), truckImage1);
+            var v3 = TrafficManager.CreateTraffic(new Rectangle(trafficVehicle3.Location, trafficVehicle3.Size), truckImage2);
+
+            // map traffic fields used previously to these vehicle objects for drawing/collision
+            SyncLocalTrafficRefs(); // initialize local GameEntity fields from TrafficManager
+
+            // States (states will call public methods on Game to show/hide overlays and control timer)
+            menuState = new MenuState(this);
+            carSelectState = new CarSelectState(this);
+            playingState = new PlayingState(this);
+            gameOverState = new GameOverState(this);
+
+            CurrentState = menuState;
+            CurrentState.Enter();
 
             PauseForMenu();
         }
@@ -201,11 +225,9 @@ namespace Chhipa_Motors
         {
             if (gameTimer != null) gameTimer.Stop();
 
-            menuPanel.Visible = true;
-            menuPanel.BringToFront();
-
-            if (gameOverPanel != null) gameOverPanel.Visible = false;
-            carSelectPanel.Visible = false;
+            ShowMenuPanel();
+            HideGameOverPanel();
+            HideCarSelectPanel();
 
             UpdateMenuTopScoreLabel();
         }
@@ -218,8 +240,8 @@ namespace Chhipa_Motors
 
         private void StartGameWithSelectedCar(Image? selectedCar)
         {
-            menuPanel.Visible = false;
-            carSelectPanel.Visible = false;
+            HideMenuPanel();
+            HideCarSelectPanel();
 
             score = 0;
 
@@ -231,13 +253,14 @@ namespace Chhipa_Motors
 
             player.Rect = new Rectangle(PlayerCar.Location, PlayerCar.Size);
             road1Rect = new Rectangle(Road1.Left, Road1.Top, Road1.Width, Road1.Height);
-            road2Rect = new Rectangle(Road1.Left, Road1.Top - Road1.Height, Road1.Width, Road1.Height);
-            spawnTraffic(traffic1);
-            spawnTraffic(traffic2);
-            spawnTraffic(traffic3);
+            road2Rect = new Rectangle(Road1.Left, Road1.Top - road1Rect.Height, Road1.Width, Road1.Height);
 
-            gameTimer.Start();
-            this.Focus();
+            // Respawn traffic through manager and sync local refs
+            foreach (var v in TrafficManager.Traffic) TrafficManager.Respawn(v);
+            SyncLocalTrafficRefs();
+
+            // NEW state transition to playing
+            SwitchToPlaying();
         }
 
         private Image? FitImageToBox(Image original, int width, int height)
@@ -300,6 +323,7 @@ namespace Chhipa_Motors
 
         private void spawnTraffic(GameEntity car)
         {
+            // kept for backward-compat / designer-based calls - but TrafficManager is primary.
             int trafficCarNum = rand.Next(1, 7);
             switch (trafficCarNum)
             {
@@ -367,42 +391,35 @@ namespace Chhipa_Motors
             car.Rect.Y = spawnY;
         }
 
-        private void gameTimer_Tick(object sender, EventArgs e)
+        // Called from timer (designer may still be wired to gameTimer_Tick; wrapper below)
+        private void OnTick(object? sender, EventArgs e)
         {
+            // Move roads (unchanged)
             road1Rect.Y += moveSpeed;
             road2Rect.Y += moveSpeed;
+            if (road1Rect.Y >= this.Height) road1Rect.Y = road2Rect.Y - road1Rect.Height;
+            if (road2Rect.Y >= this.Height) road2Rect.Y = road1Rect.Y - road2Rect.Height;
 
-            if (road1Rect.Y >= this.Height)
-            {
-                road1Rect.Y = road2Rect.Y - road1Rect.Height;
-            }
-            if (road2Rect.Y >= this.Height)
-            {
-                road2Rect.Y = road1Rect.Y - road2Rect.Height;
-            }
+            // Use TrafficManager to move traffic
+            var passedIndices = TrafficManager.UpdateAll(moveSpeed, this.ClientSize.Height);
 
-            // Move Traffic
-            traffic1.Rect.Y += moveSpeed;
-            traffic2.Rect.Y += moveSpeed;
-            traffic3.Rect.Y += moveSpeed;
-
-            if (traffic1.Rect.Y > this.Height)
+            // For each passed vehicle, award points and respawn
+            if (passedIndices.Count > 0)
             {
-                score += pointsPerPass;
-                spawnTraffic(traffic1);
-            }
-            if (traffic2.Rect.Y > this.Height)
-            {
-                score += pointsPerPass;
-                spawnTraffic(traffic2);
-            }
-            if (traffic3.Rect.Y > this.Height)
-            {
-                score += pointsPerPass;
-                spawnTraffic(traffic3);
+                score += pointsPerPass * passedIndices.Count;
+                // respawn those vehicles
+                foreach (var idx in passedIndices)
+                {
+                    var vehicle = TrafficManager.Traffic.ElementAt(idx);
+                    TrafficManager.Respawn(vehicle);
+                }
+                // update local trafficx fields used by drawing/collision
+                SyncLocalTrafficRefs();
             }
 
-            // --- COLLISION LOGIC ---
+            // collision detection: ensure local refs reflect their Rects
+            SyncLocalTrafficRefs();
+
             if (player.Rect.IntersectsWith(traffic1.Rect) ||
                 player.Rect.IntersectsWith(traffic2.Rect) ||
                 player.Rect.IntersectsWith(traffic3.Rect))
@@ -410,20 +427,94 @@ namespace Chhipa_Motors
                 this.Invalidate();
                 this.Update();
                 gameTimer.Stop();
-
-                // update best
                 UpdateTopScoreIfNeeded();
-
                 lblFinalScore.Text = $"Score: {score}\nBest: {topScore}";
-                gameOverPanel.Visible = true;
-                gameOverPanel.BringToFront();
-                this.Focus(); 
-
+                // switch to GameOver state
+                CurrentState.Exit();
+                CurrentState = gameOverState;
+                CurrentState.Enter();
                 return;
             }
 
             this.Invalidate();
         }
+
+        // Designer compatibility wrapper (if Designer still wires to gameTimer_Tick)
+        private void gameTimer_Tick(object sender, EventArgs e) => OnTick(sender, e);
+
+        // Keep local traffic1/2/3 Rect/Img in sync with TrafficManager vehicles
+        void SyncLocalTrafficRefs()
+        {
+            var list = TrafficManager.Traffic.ToArray();
+            if (list.Length >= 1) { traffic1.Rect = list[0].Rect; traffic1.Img = list[0].Img; }
+            if (list.Length >= 2) { traffic2.Rect = list[1].Rect; traffic2.Img = list[1].Img; }
+            if (list.Length >= 3) { traffic3.Rect = list[2].Rect; traffic3.Img = list[2].Img; }
+        }
+
+        // Called by PlayingState to handle movement input
+        public void HandlePlayerInput(KeyEventArgs e)
+        {
+            if (gameTimer.Enabled == false) return;
+            int speed = 25;
+            if (e.KeyCode == Keys.Left || e.KeyCode == Keys.A)
+            {
+                if (player.Rect.X - speed > road1Rect.X) player.Rect.X -= speed;
+            }
+            if (e.KeyCode == Keys.Right || e.KeyCode == Keys.D)
+            {
+                if (player.Rect.X + speed < road1Rect.X + road1Rect.Width - player.Rect.Width) player.Rect.X += speed;
+            }
+            if (e.KeyCode == Keys.Up || e.KeyCode == Keys.W)
+            {
+                if (player.Rect.Y > 0) player.Rect.Y -= speed;
+            }
+            if (e.KeyCode == Keys.Down || e.KeyCode == Keys.S)
+            {
+                if (player.Rect.Y + player.Rect.Height < this.ClientSize.Height) player.Rect.Y += speed;
+            }
+        }
+
+        // When menu quick-play click triggers car selection, set state accordingly:
+        // call CurrentState.Exit(); CurrentState = carSelectState; CurrentState.Enter(); etc.
+        // Likewise StartGameWithSelectedCar should call state transitions:
+        public void SwitchToCarSelect()
+        {
+            CurrentState.Exit();
+            CurrentState = carSelectState;
+            CurrentState.Enter();
+        }
+
+        public void SwitchToPlaying()
+        {
+            CurrentState.Exit();
+            CurrentState = playingState;
+            CurrentState.Enter();
+        }
+
+        public void SwitchToMenu()
+        {
+            CurrentState.Exit();
+            CurrentState = menuState;
+            CurrentState.Enter();
+        }
+
+        public void SwitchToGameOver()
+        {
+            CurrentState.Exit();
+            CurrentState = gameOverState;
+            CurrentState.Enter();
+        }
+
+        #region Public helpers used by State objects (keeps UI encapsulated)
+        public void ShowMenuPanel() { if (menuPanel != null) { menuPanel.Visible = true; menuPanel.BringToFront(); } }
+        public void HideMenuPanel() { if (menuPanel != null) menuPanel.Visible = false; }
+        public void ShowCarSelectPanel() { if (carSelectPanel != null) { carSelectPanel.Visible = true; carSelectPanel.BringToFront(); } }
+        public void HideCarSelectPanel() { if (carSelectPanel != null) carSelectPanel.Visible = false; }
+        public void ShowGameOverPanel() { if (gameOverPanel != null) { gameOverPanel.Visible = true; gameOverPanel.BringToFront(); } }
+        public void HideGameOverPanel() { if (gameOverPanel != null) gameOverPanel.Visible = false; }
+        public void StartTimer() { if (gameTimer != null) gameTimer.Start(); }
+        public void StopTimer() { if (gameTimer != null) gameTimer.Stop(); }
+        #endregion
 
         private void CreateInFormGameOverUI()
         {
@@ -509,10 +600,8 @@ namespace Chhipa_Motors
             };
             pbQuickPlay.Click += (s, e) =>
             {
-                // show car selection panel
-                menuPanel.Visible = false;
-                carSelectPanel.Visible = true;
-                carSelectPanel.BringToFront();
+                // show car selection panel via state
+                SwitchToCarSelect();
             };
 
             Image imgCredits = Properties.Resources.b_How2Play;
@@ -771,11 +860,11 @@ namespace Chhipa_Motors
             player.Rect = new Rectangle(PlayerCar.Location, PlayerCar.Size);
 
             road1Rect = new Rectangle(Road1.Left, Road1.Top, Road1.Width, Road1.Height);
-            road2Rect = new Rectangle(Road1.Left, Road1.Top - Road1.Height, Road1.Width, Road1.Height);
+            road2Rect = new Rectangle(Road1.Left, Road1.Top - road1Rect.Height, Road1.Width, road1Rect.Height);
 
-            spawnTraffic(traffic1);
-            spawnTraffic(traffic2);
-            spawnTraffic(traffic3);
+            // Respawn via TrafficManager and sync local refs
+            foreach (var v in TrafficManager.Traffic) TrafficManager.Respawn(v);
+            SyncLocalTrafficRefs();
 
             if (gameOverPanel != null) gameOverPanel.Visible = false;
             if (menuPanel != null) menuPanel.Visible = false;
@@ -789,34 +878,8 @@ namespace Chhipa_Motors
         }
 
         private void Game_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (gameTimer.Enabled == false) return;
-
-            int speed = 25;
-
-            if (e.KeyCode == Keys.Left || e.KeyCode == Keys.A)
-            {
-                if (player.Rect.X - speed > road1Rect.X)
-                    player.Rect.X -= speed;
-            }
-
-            if (e.KeyCode == Keys.Right || e.KeyCode == Keys.D)
-            {
-                if (player.Rect.X + speed < road1Rect.X + road1Rect.Width - player.Rect.Width)
-                    player.Rect.X += speed;
-            }
-
-            if (e.KeyCode == Keys.Up || e.KeyCode == Keys.W)
-            {
-                if (player.Rect.Y > 0)
-                    player.Rect.Y -= speed;
-            }
-
-            if (e.KeyCode == Keys.Down || e.KeyCode == Keys.S)
-            {
-                if (player.Rect.Y + player.Rect.Height < this.ClientSize.Height)
-                    player.Rect.Y += speed;
-            }
+        {            
+            CurrentState?.OnKeyDown(e);
         }
     }
 }
