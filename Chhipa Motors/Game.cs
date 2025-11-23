@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Chhipa_Motors.Properties;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -16,24 +17,51 @@ namespace Chhipa_Motors
         class GameEntity
         {
             public Rectangle Rect;
-            public Image Img;
+            public Image? Img;
         }
 
         Random rand = new Random();
-        int minSpacing = 200;
-        int moveSpeed = 10;
+        int minSpacing = 250;
+        int moveSpeed = 15;
+
+        int score = 0;
+        const int pointsPerPass = 10;
+        Font scoreFont = new Font("Segoe UI", 16, FontStyle.Bold);
+        Brush scoreBrush = Brushes.White;
 
         // Cached Images
-        Image carImage1, truckImage1, truckImage2, truckImage3, truckImage4, truckImage5;
-        Image playerImage, roadImage;
+        Image? carImage1, truckImage1, truckImage2, truckImage3, truckImage4, truckImage5;
+        Image? playerImage, roadImage;
 
         // Active Game Entities
         GameEntity player = new GameEntity();
         GameEntity traffic1 = new GameEntity();
         GameEntity traffic2 = new GameEntity();
         GameEntity traffic3 = new GameEntity();
-
+        
         Rectangle road1Rect, road2Rect;
+
+        // In-form Game Over UI
+        Panel gameOverPanel = null!;
+        Label lblOverTitle = null!;
+        Label lblFinalScore = null!;
+        Button btnPlayAgain = null!;
+        Button btnQuit = null!;
+
+        // In-form Main Menu UI (now in same form)
+        Panel menuPanel = null!;
+        PictureBox pbQuickPlay = null!;
+        PictureBox pbCredits = null!;
+        PictureBox pbHowTo = null!;
+        PictureBox pbQuit = null!;
+
+        // Credits / HowTo panels used by both menu and game
+        Panel creditsPanel = null!;
+        Label creditsLabel = null!;
+        Button creditsClose = null!;
+        Panel howToPanel = null!;
+        Label howToLabel = null!;
+        Button howToClose = null!;
 
         public Game()
         {
@@ -52,11 +80,11 @@ namespace Chhipa_Motors
             truckImage4 = FitImageToBox(Properties.Resources.trafficTruck4, carW, carH);
             truckImage5 = FitImageToBox(Properties.Resources.trafficTruck5, carW, carH);
 
-            Image tempPlayerImg = PlayerCar.Image ?? PlayerCar.BackgroundImage;
+            Image? tempPlayerImg = PlayerCar.Image ?? PlayerCar.BackgroundImage;
             if (tempPlayerImg != null)
                 playerImage = FitImageToBox(tempPlayerImg, PlayerCar.Width, PlayerCar.Height);
 
-            Image tempRoadImg = Road1.Image ?? Road1.BackgroundImage;
+            Image? tempRoadImg = Road1.Image ?? Road1.BackgroundImage;
             if (tempRoadImg != null)
             {
                 roadImage = new Bitmap(tempRoadImg, Road1.Width, Road1.Height);
@@ -83,9 +111,53 @@ namespace Chhipa_Motors
 
             Road1.Visible = false;
             Road2.Visible = false;
+
+            // Create in-form overlays
+            CreateInFormGameOverUI();
+            CreateMenuUI();
+            CreateCreditsPanel();
+            CreateHowToPanel();
+
+            // Initialize traffic but don't start the timer until player chooses Quick Play.
+            spawnTraffic(traffic1);
+            spawnTraffic(traffic2);
+            spawnTraffic(traffic3);
+
+            // Start paused showing menu
+            PauseForMenu();
         }
 
-        private Image FitImageToBox(Image original, int width, int height)
+        private void PauseForMenu()
+        {
+            // Stop the main timer so nothing moves until player starts
+            if (gameTimer != null) gameTimer.Stop();
+
+            // show menu overlay
+            menuPanel.Visible = true;
+            menuPanel.BringToFront();
+
+            // ensure game-over is hidden
+            if (gameOverPanel != null) gameOverPanel.Visible = false;
+        }
+
+        private void StartGameFromMenu()
+        {
+            menuPanel.Visible = false;
+
+            // Reset positions but preserve score if desired. Here we start fresh.
+            score = 0;
+            player.Rect = new Rectangle(PlayerCar.Location, PlayerCar.Size);
+            road1Rect = new Rectangle(Road1.Left, Road1.Top, Road1.Width, Road1.Height);
+            road2Rect = new Rectangle(Road1.Left, Road1.Top - Road1.Height, Road1.Width, Road1.Height);
+            spawnTraffic(traffic1);
+            spawnTraffic(traffic2);
+            spawnTraffic(traffic3);
+
+            gameTimer.Start();
+            this.Focus();
+        }
+
+        private Image? FitImageToBox(Image original, int width, int height)
         {
             if (original == null) return null;
             return new Bitmap(original, width, height);
@@ -119,16 +191,28 @@ namespace Chhipa_Motors
                 g.FillRectangle(Brushes.Blue, player.Rect);
 
             // 3. Draw Traffic
-            g.DrawImage(traffic1.Img, traffic1.Rect);
-            g.DrawImage(traffic2.Img, traffic2.Rect);
-            g.DrawImage(traffic3.Img, traffic3.Rect);
+            if (traffic1.Img != null) 
+                g.DrawImage(traffic1.Img, traffic1.Rect);
+            if (traffic2.Img != null) 
+                g.DrawImage(traffic2.Img, traffic2.Rect);
+            if (traffic3.Img != null)
+                g.DrawImage(traffic3.Img, traffic3.Rect);
+
+            // 4. Draw Score (top-right)
+            string scoreText = $"Score: {score}";
+            SizeF textSize = g.MeasureString(scoreText, scoreFont);
+            float padding = 10f;
+            float x = this.ClientSize.Width - padding - textSize.Width;
+            float y = padding;
+            // Draw shadow for readability
+            g.DrawString(scoreText, scoreFont, Brushes.Black, x + 1, y + 1);
+            g.DrawString(scoreText, scoreFont, scoreBrush, x, y);
         }
 
         private void spawnTraffic(GameEntity car)
         {
-            // randomizing which traffic vehicle will be present
+            // pick image
             int trafficCarNum = rand.Next(1, 7);
-
             switch (trafficCarNum)
             {
                 case 1: car.Img = carImage1; break;
@@ -140,7 +224,7 @@ namespace Chhipa_Motors
                 default: car.Img = carImage1; break;
             }
 
-            // randomizing the lane of the vehicle
+            // randomize lane
             int lanePosition = rand.Next(1, 4);
             switch (lanePosition)
             {
@@ -149,33 +233,42 @@ namespace Chhipa_Motors
                 case 3: car.Rect.X = 680; break;
             }
 
+            // choose initial spawnY above the screen
             int spawnY = -car.Rect.Height - rand.Next(100, 300);
 
-            // logic for making sure that there is enough distance between the vehicles
-            bool tooClose = true;
+            // Ensure vehicles are vertically spaced from each other (across all lanes)
+            var others = new[] { traffic1, traffic2, traffic3 }.Where(t => !ReferenceEquals(t, car)).ToArray();
             int attempts = 0;
-
-            while (tooClose && attempts < 5)
+            while (attempts < 10)
             {
-                tooClose = false;
+                bool conflict = false;
+                foreach (var other in others)
+                {
+                    // if other has a meaningful position (either already off-screen above or somewhere), ensure spacing when in same lane-ish or not
+                    if (Math.Abs(car.Rect.X - other.Rect.X) < 70)
+                    {
+                        if (Math.Abs(spawnY - other.Rect.Y) < minSpacing)
+                        {
+                            conflict = true;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        // keep some spacing even across lanes to avoid all cars stacking visually
+                        if (Math.Abs(spawnY - other.Rect.Y) < minSpacing / 2)
+                        {
+                            conflict = true;
+                            break;
+                        }
+                    }
+                }
 
-                if (car != traffic1 && traffic1.Rect.Y < 0)
-                {
-                    if (Math.Abs(car.Rect.X - traffic1.Rect.X) < 70 &&
-                        Math.Abs(spawnY - traffic1.Rect.Y) < minSpacing) tooClose = true;
-                }
-                if (car != traffic2 && traffic2.Rect.Y < 0)
-                {
-                    if (Math.Abs(car.Rect.X - traffic2.Rect.X) < 70 &&
-                        Math.Abs(spawnY - traffic2.Rect.Y) < minSpacing) tooClose = true;
-                }
-                if (car != traffic3 && traffic3.Rect.Y < 0)
-                {
-                    if (Math.Abs(car.Rect.X - traffic3.Rect.X) < 70 &&
-                        Math.Abs(spawnY - traffic3.Rect.Y) < minSpacing) tooClose = true;
-                }
+                if (!conflict) break;
 
-                if (tooClose)
+                // push further up and occasionally change lane if repeated conflicts occur
+                spawnY -= rand.Next(minSpacing, minSpacing + 200);
+                if (attempts % 2 == 1)
                 {
                     lanePosition = rand.Next(1, 4);
                     switch (lanePosition)
@@ -184,10 +277,11 @@ namespace Chhipa_Motors
                         case 2: car.Rect.X = 560; break;
                         case 3: car.Rect.X = 680; break;
                     }
-                    spawnY -= rand.Next(100, 200);
-                    attempts++;
                 }
+
+                attempts++;
             }
+
             car.Rect.Y = spawnY;
         }
 
@@ -211,9 +305,22 @@ namespace Chhipa_Motors
             traffic2.Rect.Y += moveSpeed;
             traffic3.Rect.Y += moveSpeed;
 
-            if (traffic1.Rect.Y > this.Height) spawnTraffic(traffic1);
-            if (traffic2.Rect.Y > this.Height) spawnTraffic(traffic2);
-            if (traffic3.Rect.Y > this.Height) spawnTraffic(traffic3);
+            // If a traffic car passes beyond the bottom, award points and respawn it
+            if (traffic1.Rect.Y > this.Height)
+            {
+                score += pointsPerPass;
+                spawnTraffic(traffic1);
+            }
+            if (traffic2.Rect.Y > this.Height)
+            {
+                score += pointsPerPass;
+                spawnTraffic(traffic2);
+            }
+            if (traffic3.Rect.Y > this.Height)
+            {
+                score += pointsPerPass;
+                spawnTraffic(traffic3);
+            }
 
             // --- COLLISION LOGIC ---
             if (player.Rect.IntersectsWith(traffic1.Rect) ||
@@ -221,12 +328,11 @@ namespace Chhipa_Motors
                 player.Rect.IntersectsWith(traffic3.Rect))
             {
                 gameTimer.Stop();
-                DialogResult result = MessageBox.Show("GAME OVER!", "Crash!", MessageBoxButtons.OK);
 
-                if (result == DialogResult.OK)
-                {
-                    Application.Exit();
-                }
+                lblFinalScore.Text = $"Score: {score}";
+                gameOverPanel.Visible = true;
+                gameOverPanel.BringToFront();
+                this.Focus(); 
 
                 return;
             }
@@ -234,12 +340,294 @@ namespace Chhipa_Motors
             this.Invalidate();
         }
 
+        private void CreateInFormGameOverUI()
+        {
+            // Panel
+            gameOverPanel = new Panel
+            {
+                Size = new Size(340, 170),
+                BackColor = Color.FromArgb(230, 30, 30, 30),
+                BorderStyle = BorderStyle.FixedSingle,
+                Visible = false
+            };
+
+            // Title
+            lblOverTitle = new Label
+            {
+                Text = "GAME OVER",
+                Font = new Font("Segoe UI", 18, FontStyle.Bold),
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Top,
+                Height = 50
+            };
+            gameOverPanel.Controls.Add(lblOverTitle);
+
+            // Score label
+            lblFinalScore = new Label
+            {
+                Text = "Score: 0",
+                Font = new Font("Segoe UI", 14, FontStyle.Regular),
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Top,
+                Height = 50
+            };
+            gameOverPanel.Controls.Add(lblFinalScore);
+
+            // Buttons
+            btnPlayAgain = new Button
+            {
+                Text = "Play Again",
+                Size = new Size(120, 36),
+                Location = new Point(40, 110)
+            };
+            btnPlayAgain.Click += (s, e) =>
+            {
+                gameOverPanel.Visible = false;
+                ResetGame();
+            };
+            gameOverPanel.Controls.Add(btnPlayAgain);
+
+            btnQuit = new Button
+            {
+                Text = "Quit",
+                Size = new Size(120, 36),
+                Location = new Point(gameOverPanel.Width - 40 - 120, 110)
+            };
+            btnQuit.Click += (s, e) => Application.Exit();
+            gameOverPanel.Controls.Add(btnQuit);
+
+            CenterOverlayPanel(gameOverPanel);
+            this.Controls.Add(gameOverPanel);
+            gameOverPanel.BringToFront();
+
+            this.Resize += (s, e) => CenterOverlayPanel(gameOverPanel);
+        }
+
+        private void CreateMenuUI()
+        {
+            menuPanel = new Panel
+            {
+                Size = new Size(500, 400),
+                BackColor = Color.FromArgb(200, 10, 10, 10),
+                BorderStyle = BorderStyle.FixedSingle,
+                Visible = false
+            };
+
+            int gap = 16;
+
+            // Quick Play
+            pbQuickPlay = new PictureBox
+            {
+                Image = Properties.Resources.b_QuickPlay,
+                SizeMode = PictureBoxSizeMode.AutoSize,
+                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent
+            };
+            pbQuickPlay.Click += (s, e) => StartGameFromMenu();
+
+            // Scale Credits button
+            Image imgCredits = Properties.Resources.b_How2Play;
+
+            double? scaleFactor = 0.7;
+            int credWidth = (int)(imgCredits.Width * scaleFactor);
+            int credHeight = (int)(imgCredits.Height * scaleFactor + 4);
+
+            // Credits
+            pbCredits = new PictureBox
+            {
+                Image = Properties.Resources.b_Credits,
+                SizeMode = PictureBoxSizeMode.StretchImage,
+                Size = new Size(credWidth, credHeight),
+                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent
+            };
+            pbCredits.Click += (s, e) => ShowCredits();
+
+            // How To Play
+            pbHowTo = new PictureBox
+            {
+                Image = Properties.Resources.b_How2Play,
+                SizeMode = PictureBoxSizeMode.AutoSize,
+                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent
+            };
+            pbHowTo.Click += (s, e) => ShowHowTo();
+
+            // Quit
+            pbQuit = new PictureBox
+            {
+                Image = Properties.Resources.b_Quit,
+                SizeMode = PictureBoxSizeMode.AutoSize,
+                Cursor = Cursors.Hand,
+                BackColor = Color.Transparent
+            };
+            pbQuit.Click += (s, e) => Application.Exit();
+
+            int totalHeight = pbQuickPlay.Height + pbCredits.Height + pbHowTo.Height + pbQuit.Height + (3 * gap);
+            int currentY = (menuPanel.Height - totalHeight) / 2;
+
+            // Position Quick Play
+            pbQuickPlay.Location = new Point((menuPanel.Width - pbQuickPlay.Width) / 2, currentY);
+
+            // Position Credits
+            currentY = pbQuickPlay.Bottom + gap;
+            pbCredits.Location = new Point((menuPanel.Width - pbCredits.Width) / 2, currentY);
+
+            // Position How To
+            currentY = pbCredits.Bottom + gap;
+            pbHowTo.Location = new Point((menuPanel.Width - pbHowTo.Width) / 2, currentY);
+
+            // Position Quit
+            currentY = pbHowTo.Bottom + gap;
+            pbQuit.Location = new Point((menuPanel.Width - pbQuit.Width) / 2, currentY);
+
+            // Assemble
+            menuPanel.Controls.Add(pbQuickPlay);
+            menuPanel.Controls.Add(pbCredits);
+            menuPanel.Controls.Add(pbHowTo);
+            menuPanel.Controls.Add(pbQuit);
+
+            CenterOverlayPanel(menuPanel);
+            this.Controls.Add(menuPanel);
+            menuPanel.BringToFront();
+
+            this.Resize += (s, e) => CenterOverlayPanel(menuPanel);
+        }
+
+        private void CreateCreditsPanel()
+        {
+            creditsPanel = new Panel
+            {
+                Size = new Size(420, 220),
+                BackColor = Color.FromArgb(230, 20, 20, 20),
+                BorderStyle = BorderStyle.FixedSingle,
+                Visible = false
+            };
+
+            creditsLabel = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 150,
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 11, FontStyle.Regular),
+                Text = "Creators:\n\n- Your Name 1\n- Your Name 2\n- Your Name 3\n\nThank you for playing!"
+            };
+            creditsPanel.Controls.Add(creditsLabel);
+
+            creditsClose = new Button
+            {
+                Text = "Close",
+                Size = new Size(100, 32),
+                Location = new Point((creditsPanel.Width - 100) / 2, creditsPanel.Height - 50)
+            };
+            creditsClose.Click += (s, e) => creditsPanel.Visible = false;
+            creditsPanel.Controls.Add(creditsClose);
+
+            CenterOverlayPanel(creditsPanel);
+            this.Controls.Add(creditsPanel);
+            creditsPanel.BringToFront();
+
+            this.Resize += (s, e) => CenterOverlayPanel(creditsPanel);
+        }
+
+        private void CreateHowToPanel()
+        {
+            howToPanel = new Panel
+            {
+                Size = new Size(480, 240),
+                BackColor = Color.FromArgb(230, 20, 20, 20),
+                BorderStyle = BorderStyle.FixedSingle,
+                Visible = false
+            };
+
+            howToLabel = new Label
+            {
+                Dock = DockStyle.Top,
+                Height = 180,
+                TextAlign = ContentAlignment.TopLeft,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10, FontStyle.Regular),
+                Padding = new Padding(12),
+                Text = "How to Play:\n\n- Use arrow keys or WASD to move your car.\n- Avoid incoming traffic.\n- Each car you pass gives +10 points.\n- If you crash, you'll see the Game Over overlay with your final score.\n\nGood luck!"
+            };
+            howToPanel.Controls.Add(howToLabel);
+
+            howToClose = new Button
+            {
+                Text = "Close",
+                Size = new Size(100, 32),
+                Location = new Point((howToPanel.Width - 100) / 2, howToPanel.Height - 50)
+            };
+            howToClose.Click += (s, e) => howToPanel.Visible = false;
+            howToPanel.Controls.Add(howToClose);
+
+            CenterOverlayPanel(howToPanel);
+            this.Controls.Add(howToPanel);
+            howToPanel.BringToFront();
+
+            this.Resize += (s, e) => CenterOverlayPanel(howToPanel);
+        }
+
+        private void CenterOverlayPanel(Panel p)
+        {
+            if (p == null) return;
+            int x = Math.Max(0, (this.ClientSize.Width - p.Width) / 2);
+            int y = Math.Max(0, (this.ClientSize.Height - p.Height) / 2);
+            p.Location = new Point(x, y);
+        }
+
+        private void ShowCredits()
+        {
+            creditsPanel.Visible = true;
+            creditsPanel.BringToFront();
+        }
+
+        private void ShowHowTo()
+        {
+            howToPanel.Visible = true;
+            howToPanel.BringToFront();
+        }
+
+        private void ResetGame()
+        {
+            // Reset score
+            score = 0;
+
+            // Reset player to original designer position
+            player.Rect = new Rectangle(PlayerCar.Location, PlayerCar.Size);
+
+            // Reset roads
+            road1Rect = new Rectangle(Road1.Left, Road1.Top, Road1.Width, Road1.Height);
+            road2Rect = new Rectangle(Road1.Left, Road1.Top - Road1.Height, Road1.Width, Road1.Height);
+
+            // Respawn traffic
+            spawnTraffic(traffic1);
+            spawnTraffic(traffic2);
+            spawnTraffic(traffic3);
+
+            // Hide overlays
+            if (gameOverPanel != null) gameOverPanel.Visible = false;
+            if (menuPanel != null) menuPanel.Visible = false;
+            if (creditsPanel != null) creditsPanel.Visible = false;
+            if (howToPanel != null) howToPanel.Visible = false;
+
+            // Restart timer and refresh
+            gameTimer.Start();
+            this.Invalidate();
+
+            // Ensure the form has focus to receive keyboard input
+            this.Focus();
+        }
+
         private void Game_KeyDown(object sender, KeyEventArgs e)
         {
             // disabling all controls once game is over
             if (gameTimer.Enabled == false) return;
 
-            int speed = 15;
+            int speed = 25;
 
             // Handling movement of car
             if (e.KeyCode == Keys.Left || e.KeyCode == Keys.A)
