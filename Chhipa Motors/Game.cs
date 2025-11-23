@@ -26,7 +26,7 @@ namespace Chhipa_Motors
 
         int score = 0;
         const int pointsPerPass = 10;
-        Font scoreFont = new Font("Segoe UI", 16, FontStyle.Bold);
+        Font scoreFont = new Font("Segoe UI", 24, FontStyle.Bold);
         Brush scoreBrush = Brushes.White;
 
         // Cached Images
@@ -41,21 +41,21 @@ namespace Chhipa_Motors
         
         Rectangle road1Rect, road2Rect;
 
-        // In-form Game Over UI
+        // Game Over UI
         Panel gameOverPanel = null!;
         Label lblOverTitle = null!;
         Label lblFinalScore = null!;
         Button btnPlayAgain = null!;
         Button btnQuit = null!;
 
-        // In-form Main Menu UI (now in same form)
+        // Main Menu UI
         Panel menuPanel = null!;
         PictureBox pbQuickPlay = null!;
         PictureBox pbCredits = null!;
         PictureBox pbHowTo = null!;
         PictureBox pbQuit = null!;
 
-        // Credits / HowTo panels used by both menu and game
+        // Credits / HowTo panels
         Panel creditsPanel = null!;
         Label creditsLabel = null!;
         Button creditsClose = null!;
@@ -112,39 +112,32 @@ namespace Chhipa_Motors
             Road1.Visible = false;
             Road2.Visible = false;
 
-            // Create in-form overlays
             CreateInFormGameOverUI();
             CreateMenuUI();
             CreateCreditsPanel();
             CreateHowToPanel();
 
-            // Initialize traffic but don't start the timer until player chooses Quick Play.
             spawnTraffic(traffic1);
             spawnTraffic(traffic2);
             spawnTraffic(traffic3);
 
-            // Start paused showing menu
             PauseForMenu();
         }
 
         private void PauseForMenu()
         {
-            // Stop the main timer so nothing moves until player starts
             if (gameTimer != null) gameTimer.Stop();
 
-            // show menu overlay
             menuPanel.Visible = true;
             menuPanel.BringToFront();
 
-            // ensure game-over is hidden
             if (gameOverPanel != null) gameOverPanel.Visible = false;
         }
 
         private void StartGameFromMenu()
         {
             menuPanel.Visible = false;
-
-            // Reset positions but preserve score if desired. Here we start fresh.
+            
             score = 0;
             player.Rect = new Rectangle(PlayerCar.Location, PlayerCar.Size);
             road1Rect = new Rectangle(Road1.Left, Road1.Top, Road1.Width, Road1.Height);
@@ -204,14 +197,13 @@ namespace Chhipa_Motors
             float padding = 10f;
             float x = this.ClientSize.Width - padding - textSize.Width;
             float y = padding;
-            // Draw shadow for readability
+            // Draw shadow
             g.DrawString(scoreText, scoreFont, Brushes.Black, x + 1, y + 1);
             g.DrawString(scoreText, scoreFont, scoreBrush, x, y);
         }
 
         private void spawnTraffic(GameEntity car)
         {
-            // pick image
             int trafficCarNum = rand.Next(1, 7);
             switch (trafficCarNum)
             {
@@ -224,7 +216,6 @@ namespace Chhipa_Motors
                 default: car.Img = carImage1; break;
             }
 
-            // randomize lane
             int lanePosition = rand.Next(1, 4);
             switch (lanePosition)
             {
@@ -233,18 +224,15 @@ namespace Chhipa_Motors
                 case 3: car.Rect.X = 680; break;
             }
 
-            // choose initial spawnY above the screen
             int spawnY = -car.Rect.Height - rand.Next(100, 300);
 
-            // Ensure vehicles are vertically spaced from each other (across all lanes)
             var others = new[] { traffic1, traffic2, traffic3 }.Where(t => !ReferenceEquals(t, car)).ToArray();
             int attempts = 0;
-            while (attempts < 10)
+            while (attempts < 5)
             {
                 bool conflict = false;
                 foreach (var other in others)
                 {
-                    // if other has a meaningful position (either already off-screen above or somewhere), ensure spacing when in same lane-ish or not
                     if (Math.Abs(car.Rect.X - other.Rect.X) < 70)
                     {
                         if (Math.Abs(spawnY - other.Rect.Y) < minSpacing)
@@ -255,7 +243,6 @@ namespace Chhipa_Motors
                     }
                     else
                     {
-                        // keep some spacing even across lanes to avoid all cars stacking visually
                         if (Math.Abs(spawnY - other.Rect.Y) < minSpacing / 2)
                         {
                             conflict = true;
@@ -266,7 +253,6 @@ namespace Chhipa_Motors
 
                 if (!conflict) break;
 
-                // push further up and occasionally change lane if repeated conflicts occur
                 spawnY -= rand.Next(minSpacing, minSpacing + 200);
                 if (attempts % 2 == 1)
                 {
@@ -513,7 +499,7 @@ namespace Chhipa_Motors
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI", 11, FontStyle.Regular),
-                Text = "Creators:\n\n- Your Name 1\n- Your Name 2\n- Your Name 3\n\nThank you for playing!"
+                Text = "Creators:\n- Eesa Shoaib\n- Harris Tabussum\n- Husnain Barkat\n- Abdullah Mushtaq\nThank you for playing!"
             };
             creditsPanel.Controls.Add(creditsLabel);
 
