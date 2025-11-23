@@ -21,7 +21,7 @@ namespace Chhipa_Motors
         }
 
         Random rand = new Random();
-        int minSpacing = 250;
+        int minSpacing = 225;
         int moveSpeed = 15;
 
         int score = 0;
