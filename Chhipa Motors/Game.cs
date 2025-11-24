@@ -449,6 +449,8 @@ namespace Chhipa_Motors
             {
                 // stop and show game over
                 gameTimer.Stop();
+                this.Invalidate();
+                this.Update();
                 UpdateTopScoreIfNeeded();
                 lblFinalScore.Text = $"Score: {score}\nBest: {topScore}";
 
