@@ -117,7 +117,7 @@
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            BackgroundImage = Properties.Resources.Back;
+            BackColor = SystemColors.AppWorkspace;
             ClientSize = new Size(1182, 753);
             Controls.Add(trafficVehicle3);
             Controls.Add(trafficVehicle2);
